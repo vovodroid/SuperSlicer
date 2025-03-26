@@ -4471,7 +4471,7 @@ ProcessSurfaceResult PerimeterGenerator::process_classic(const Parameters &     
                 coordf_t good_spacing    = params.get_ext_perimeter_width() / 2;
                 coordf_t overlap_spacing = (1 - thin_perimeter) * params.get_ext_perimeter_spacing() / 2;
                 if (holes_count == 0 || contour_count == 0) {
-
+                    allow_perimeter_anti_hysteresis = false; // don't erase that complicated next_onion computation
                     if (holes_count == 0) {
                         for (ExPolygon &expoly : last) { 
                             last_asynch.push_back(ExPolygonAsynch{ExPolygonAsynch::ExPolygonAsynchType::epatShrinkContour, expoly,
@@ -4497,9 +4497,9 @@ ProcessSurfaceResult PerimeterGenerator::process_classic(const Parameters &     
                                                ClipperLib::JoinType::jtMiter, 3);
                     } else {
                         coordf_t good_spacing    = params.get_ext_perimeter_width() / 2;
-                        coordf_t overlap_spacing = (1 - thin_perimeter) * params.get_ext_perimeter_spacing() / 2;
+                        coordf_t overlap_spacing = (1.f - thin_perimeter) * params.get_ext_perimeter_spacing() / 2;
                         next_onion               = offset2_ex(last, -(float) (good_spacing + overlap_spacing - 1),
-                                                +(float) (overlap_spacing + 1), ClipperLib::JoinType::jtMiter, 3);
+                                                +(float) (overlap_spacing - 1), ClipperLib::JoinType::jtMiter, 3);
                     }
                     if (thin_perimeter < 0.7) {
                         // offset2_ex can create artifacts, if too big. see superslicer#2428
@@ -4519,20 +4519,28 @@ ProcessSurfaceResult PerimeterGenerator::process_classic(const Parameters &     
                 if (params.config.thin_walls) {
 
                     // detect edge case where a curve can be split in multiple small chunks.
-                    if (allow_perimeter_anti_hysteresis && !special_area) {
-                        std::vector<float> divs = { 2.1f, 1.9f, 2.2f, 1.75f, 1.5f }; //don't go too far, it's not possible to print thin wall after that
-                        size_t idx_div = 0;
-                        while (next_onion.size() > last.size() && idx_div < divs.size()) {
-                            float div = divs[idx_div];
+                    if (allow_perimeter_anti_hysteresis && !special_area && next_onion.size() > last.size()) {
+                         // don't go too far, it's not possible to print thin wall after that
+                        std::vector<float> variations = { -.025f, .025f, -.05f, .05f, -.075f, .1f, .15f};
+                        const coordf_t good_spacing    = params.get_ext_perimeter_width() / 2;
+                        const coordf_t overlap_spacing = (1 - thin_perimeter) * params.get_ext_perimeter_spacing() / 2;
+                        for (size_t idx_variations = 0;
+                             next_onion.size() > last.size() && idx_variations < variations.size();
+                             idx_variations++) {
+                            const coordf_t spacing_change = params.get_ext_perimeter_spacing() * variations[idx_variations];
+                            //don't go over 100% overlap
+                            if (overlap_spacing + spacing_change < 1) {
+                                continue;
+                            }
                             //use a sightly bigger spacing to try to drastically improve the split, that can lead to very thick gapfill
                             ExPolygons next_onion_secondTry = offset2_ex(
                                 last,
-                                -(float)((params.get_ext_perimeter_width() / 2) + (params.get_ext_perimeter_spacing() / div) - 1),
-                                +(float)((params.get_ext_perimeter_spacing() / div) - 1));
+                                -(float)(good_spacing + overlap_spacing + spacing_change - 1),
+                                +(float)(overlap_spacing + spacing_change) - 1);
                             if (next_onion.size() > next_onion_secondTry.size() * 1.2 && next_onion.size() > next_onion_secondTry.size() + 2) {
                                 next_onion = next_onion_secondTry;
                             }
-                            idx_div++;
+                            
                         }
                     }
 
@@ -4624,8 +4632,9 @@ ProcessSurfaceResult PerimeterGenerator::process_classic(const Parameters &     
             } else {
                 //FIXME Is this offset correct if the line width of the inner perimeters differs
                 // from the line width of the infill?
-                coord_t good_spacing = (perimeter_idx == 1) ? params.get_ext_perimeter_spacing2() : params.get_perimeter_spacing();
+                const coord_t good_spacing = (perimeter_idx == 1) ? params.get_ext_perimeter_spacing2() : params.get_perimeter_spacing();
                 if (thin_perimeter <= 0.98) {
+                    const coordf_t overlap_spacing = (1 - thin_perimeter) * params.get_perimeter_spacing() / 2;
                     // This path will ensure, that the perimeters do not overfill, as in 
                     // prusa3d/Slic3r GH #32, but with the cost of rounding the perimeters
                     // excessively, creating gaps, which then need to be filled in by the not very
@@ -4633,8 +4642,8 @@ ProcessSurfaceResult PerimeterGenerator::process_classic(const Parameters &     
                     // Also the offset2(perimeter, -x, x) may sometimes lead to a perimeter, which is larger than
                     // the original.
                     next_onion = offset2_ex(last,
-                        -(float)(good_spacing + (1 - thin_perimeter) * params.get_perimeter_spacing() / 2 - 1),
-                        +(float)((1 - thin_perimeter) * params.get_perimeter_spacing() / 2 - 1),
+                        -(float)(good_spacing + overlap_spacing - 1),
+                        +(float)(overlap_spacing - 1),
                         (params.use_round_perimeters() ? ClipperLib::JoinType::jtRound : ClipperLib::JoinType::jtMiter),
                         (params.use_round_perimeters() ? params.get_min_round_spacing() : 3));
                     if (allow_perimeter_anti_hysteresis) {
@@ -4648,17 +4657,17 @@ ProcessSurfaceResult PerimeterGenerator::process_classic(const Parameters &     
                         double new_area = 0;
                         for (const ExPolygon &expoly : next_onion) { new_area += expoly.area(); }
 
-                        std::vector<float> divs{1.8f, 1.6f}; // don't over-extrude, so don't use divider >2
-                        size_t             idx_div = 0;
-                        while ((next_onion.size() > no_thin_onion.size() ||
-                                (new_area != 0 && last_area > new_area * 100)) &&
-                               idx_div < divs.size()) {
-                            float div = divs[idx_div];
+                        std::vector<float> variations = { .025f, .06f, .125f};// don't over-extrude, so don't use negative variations
+                        for (size_t idx_variations = 0; (next_onion.size() > no_thin_onion.size() ||
+                                                         (new_area != 0 && last_area > new_area * 100)) &&
+                             idx_variations < variations.size();
+                             idx_variations++) {
+                            const coordf_t spacing_change = params.get_ext_perimeter_spacing() * variations[idx_variations];
                             //use a sightly bigger spacing to try to drastically improve the split, that can lead to very thick gapfill
                             ExPolygons next_onion_secondTry = offset2_ex(
                                 last,
-                                -(float)(good_spacing + (1 - thin_perimeter) * (params.get_perimeter_spacing() / div) - 1),
-                                +(float)((1 - thin_perimeter) * (params.get_perimeter_spacing() / div) - 1));
+                                -(float)(good_spacing + overlap_spacing + spacing_change - 1),
+                                +(float)(overlap_spacing + spacing_change - 1));
                             if (next_onion.size() > next_onion_secondTry.size() * 1.2 && next_onion.size() > next_onion_secondTry.size() + 2) {
                                 // don't get it if it creates too many
                                 next_onion = next_onion_secondTry;
@@ -4670,7 +4679,6 @@ ProcessSurfaceResult PerimeterGenerator::process_classic(const Parameters &     
                                     next_onion = next_onion_secondTry;
                                 }
                             }
-                            idx_div++;
                         }
                         last_area = new_area;
                     }
