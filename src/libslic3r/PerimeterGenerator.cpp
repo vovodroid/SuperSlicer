@@ -3776,7 +3776,8 @@ void PerimeterGenerator::process(// Input:
             //}
         }
         
-        if (lower_slices != nullptr && params.config.overhangs_width_speed.is_enabled() && params.config.extra_perimeters_on_overhangs &&
+        if (lower_slices != nullptr &&
+            params.config.extra_perimeters_on_overhangs &&
             params.config.perimeters > 0 && params.layer->id() > params.object_config.raft_layers) {
 
             // remove infill/peri encroaching
