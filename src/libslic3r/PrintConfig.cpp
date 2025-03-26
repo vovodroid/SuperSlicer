@@ -3131,6 +3131,8 @@ void PrintConfigDef::init_fff_params()
     def->label = L("xyz decimals");
     def->category = OptionCategory::output;
     def->tooltip = L("Choose how many digits after the dot for xyz coordinates.");
+    def->min = 0;
+    def->max = 7;
     def->mode = comExpert | comSuSi;
     def->set_default_value(new ConfigOptionInt(3));
 
@@ -3138,6 +3140,8 @@ void PrintConfigDef::init_fff_params()
     def->label = L("Extruder decimals");
     def->category = OptionCategory::output;
     def->tooltip = L("Choose how many digits after the dot for extruder moves.");
+    def->min = 0;
+    def->max = 7;
     def->mode = comExpert | comSuSi;
     def->set_default_value(new ConfigOptionInt(5));
 
