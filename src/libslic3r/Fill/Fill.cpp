@@ -526,7 +526,6 @@ std::vector<SurfaceFill> group_fills(const Layer &layer)
                 } else if (fill.expolygons.size() > 1 || !all_expolygons.empty()) {
                     assert_valid(fill.expolygons);
                     // subtract the preceding polygons, to avoid overlapping infills.
-                    fill.expolygons = offset2_ex(fill.expolygons, fill.params.flow.scaled_width() / 4, -fill.params.flow.scaled_width() / 4);
                     if (!all_expolygons.empty()) {
                         fill.expolygons = diff_ex(fill.expolygons, all_expolygons, ApplySafetyOffset::Yes);
                         ensure_valid(fill.expolygons, resolution);
